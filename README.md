@@ -15,7 +15,7 @@ Raspberry Pi 3 Model B running two crypto chips simultaneously on separate I2C b
 
 ### Why two I2C buses?
 
-Raspberry Pi 3's BCM2837 SoC has a [known bug with I2C clock stretching](https://github.com/raspberrypi/linux/issues/sp254). Crypto chips — especially OPTIGA Trust M with its IFX I2C protocol — rely heavily on clock stretching during cryptographic operations. The hardware I2C controller loses synchronization.
+Raspberry Pi 3's BCM2837 SoC has a [known bug with I2C clock stretching](https://github.com/raspberrypi/linux/issues/254). Crypto chips — especially OPTIGA Trust M with its IFX I2C protocol — rely heavily on clock stretching during cryptographic operations. The hardware I2C controller loses synchronization.
 
 **Solution:** OPTIGA Trust M runs on a software (bit-banged) I2C bus via `i2c-gpio` kernel overlay, which correctly waits for the SCL line state. ATECC608A has simpler I2C communication and works fine on the hardware bus.
 
