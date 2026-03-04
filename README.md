@@ -96,8 +96,8 @@ python3 scripts/test_atecc.py
 - [x] I2C communication with OPTIGA Trust M (via software I2C)
 - [x] Dual chip setup on separate buses
 - [x] Serial number, info, SHA-256 on ATECC608A
-- [ ] Lock config zone on ATECC608A (enables real RNG and key generation)
-- [ ] ECC P-256 key generation and ECDSA signing
+- [x] Lock config zone on ATECC608A (enables real RNG and key generation)
+- [x] ECC P-256 key generation and ECDSA signing
 - [ ] OPTIGA Trust M Python communication
 - [ ] ATECC608B bare chip soldering and testing
 - [ ] Signing service prototype (Web3Signer-compatible)
