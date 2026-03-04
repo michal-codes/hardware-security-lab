@@ -1,0 +1,22 @@
+[Unit]
+Description=ATECC608A SSH Agent
+Documentation=https://github.com/chorusdeus/atecc-ssh-agent
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/atecc-ssh-agent/atecc_ssh_agent.py --socket %t/atecc-ssh-agent.sock
+ExecStop=/bin/kill -TERM $MAINPID
+Restart=on-failure
+RestartSec=5
+
+# Security hardening
+ProtectHome=read-only
+ProtectSystem=strict
+PrivateTmp=true
+NoNewPrivileges=true
+# I2C access required
+SupplementaryGroups=i2c
+
+[Install]
+WantedBy=default.target
