@@ -9,6 +9,23 @@
 > Chip po zablokowaniu Config Zone jest NIEODWRACALNIE skonfigurowany.
 > Każdy krok poniżej wykonać **przed** wywołaniem `atcab_lock_config_zone()`.
 
+## Zależności
+
+```bash
+python3 -m venv ~/crypto-env
+source ~/crypto-env/bin/activate
+pip install cryptoauthlib cryptography
+
+python3 -c "from cryptoauthlib import ATCADeviceType; print(list(ATCADeviceType))"
+
+# aliasy do .bashrc
+alias crypto="source ~/crypto-env/bin/activate"
+alias p='python3'
+```
+
+- `cryptoauthlib` — Python wrapper dla biblioteki Microchip, komunikacja z chipem przez I2C
+- `cryptography` — weryfikacja podpisów ECC po stronie software (wymagane przed lockiem Data Zone, bo `atcab_verify_extern()` działa dopiero po locku)
+
 ---
 
 ## Faza 0: Połączenie i identyfikacja
