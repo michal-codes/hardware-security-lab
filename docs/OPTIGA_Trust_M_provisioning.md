@@ -147,6 +147,10 @@ Użycie:
 
 ```bash
 LD_PRELOAD=~/OPTIGA-Trust-M/i2c_redirect.so python3 skrypt.py
+
+
+add to .bashrc
+alias optiga="LD_PRELOAD=~/OPTIGA-Trust-M/i2c_redirect.so python3"
 ```
 
 **Uwaga na błędy GPIO**: PAL wciąż wypisuje `Failed to open gpio direction for writing!` — to ostrzeżenie, nie błąd krytyczny.
