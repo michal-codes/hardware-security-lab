@@ -488,7 +488,7 @@ atcab_release()
 
 ## Uwagi
 
-- **Jeden chip = jedna szansa.** Fabryczny ATECC608A kosztuje kilka dolarów. Mieć zapasowy na testy.
+- **Jeden chip = jedna szansa.** Fabryczny Qwiic Cryptographic Co-Processor Breakout ATECC608A kosztuje kilka dolarów. Mieć zapasowy na testy.
 - **Dokumentacja Microchip** to jedyne źródło prawdy o bitach SlotConfig/KeyConfig.
 - **`atcab_sign()` przyjmuje 32-bajtowy digest** (SHA-256), nie surową wiadomość. Zawsze hashować przed podpisaniem.
 - **Po locku Config Zone, przed lockiem Data Zone** — to jedyny moment na generowanie kluczy (`atcab_genkey()`). Każde wywołanie GenKey nadpisuje poprzedni klucz w slocie nowym losowym. Po locku Data Zone klucze prywatne zamrożone na zawsze.
@@ -547,7 +547,7 @@ for i in range(0, 128, 16):
 ## `atcab_info()` — identyfikacja chipa
 
 Komenda `INFO` wysyłana przez I2C. Zwraca 4 bajty z **revision number** układu.
-Typowy output dla ATECC608A: `00600300`
+Typowy output dla ATECC608A: `00600200`
 
 Zastosowanie:
 - Sprawdzenie czy chip odpowiada (I2C działa)
