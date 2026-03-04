@@ -1,8 +1,13 @@
-# ATECC608A — Checklist przed LOCK (v2)
+# ATECC608A — Provisioning
+
+> Dokument powstał na podstawie konfiguracji chipa Qwiic Cryptographic Co-Processor Breakout (SparkFun).
+
+---
+
+## Część 1: Checklist przed LOCK
 
 > Chip po zablokowaniu Config Zone jest NIEODWRACALNIE skonfigurowany.
 > Każdy krok poniżej wykonać **przed** wywołaniem `atcab_lock_config_zone()`.
-> Dokument powstał na podstawie konfiguracji chipa Qwiic Cryptographic Co-Processor Breakout (SparkFun).
 
 ---
 
@@ -476,3 +481,380 @@ atcab_release()
 - **Endianness** — wartości w Config Zone są little-endian. KeyConfig `0x0033` w pamięci to bajty `0x33, 0x00`. Nie mylić z `0x3300`.
 - **Qwiic I2C** — przy kablach dłuższych niż ~20 cm dodać pull-upy 4.7kΩ na SDA/SCL.
 - **Sloty ECC P-256** — ATECC608A ma maksymalnie 6 slotów na klucze prywatne ECC (0-4 i 7). Sloty 8-15 to dane/klucze symetryczne.
+
+---
+
+# Część 2: Analiza Config Zone i generowanie kluczy
+
+> Wykonywać po `atcab_lock_config_zone()`. Dokumentacja zmian, generowanie finalnych kluczy, lock Data Zone.
+
+---
+
+## Skrypt 1: Init + Info + Config Zone dump
+
+```python
+from cryptoauthlib import *
+import time
+
+cfg = cfg_ateccx08a_i2c_default()
+cfg.cfg.atcai2c.bus = 1
+cfg.cfg.atcai2c.address = 0xC0  # Qwiic domyślny (7-bit: 0x60)
+cfg.devtype = 3                 # ATECC608A
+
+status = atcab_init(cfg)
+assert status == 0, f"Init failed: {status}"
+time.sleep(0.1)
+
+rev = bytearray(4)
+atcab_info(rev)
+print(f"Revision: {rev.hex()}")
+# ATECC608A: 00 00 60 02
+# ATECC608B: 00 00 60 03
+
+config = bytearray(128)
+atcab_read_config_zone(config)
+
+for i in range(0, 128, 16):
+    hex_str = ' '.join(f'{b:02X}' for b in config[i:i+16])
+    print(f"  [{i:3d}] {hex_str}")
+```
+
+### Uwagi
+- `address = 0xC0` — 8-bit zapis adresu; 7-bit to `0x60` (widoczny w `i2cdetect`)
+- `devtype = 3` — enum dla ATECC608A
+- `time.sleep(0.1)` po `atcab_init()` — wymagane dla stabilności komunikacji
+- Revision `00006002` = ATECC608A, `00006003` = ATECC608B
+
+---
+
+## `atcab_info()` — identyfikacja chipa
+
+Komenda `INFO` wysyłana przez I2C. Zwraca 4 bajty z **revision number** układu.
+Typowy output dla ATECC608A: `00600300`
+
+Zastosowanie:
+- Sprawdzenie czy chip odpowiada (I2C działa)
+- Identyfikacja wersji krzemu
+
+---
+
+## Config Zone — mapa 128 bajtów
+
+```
+Bytes [0-12]   — Serial Number + Revision    (read-only, fabryczne)
+Bytes [13-15]  — I2C Enable, reserved
+Byte  [16]     — I2C Address (domyślnie 0x60)
+Bytes [17-19]  — Count Match, Chip Mode
+Bytes [20-51]  — SlotConfig     (16 slotów × 2 bajty)
+Bytes [52-53]  — Counter[0]
+Bytes [54-55]  — Counter[1]
+Bytes [56-57]  — UseLock, VolatileKey
+Bytes [58-83]  — SecureBoot, KDF, reserved
+Bytes [84-85]  — UserExtra, Selector
+Bytes [86-87]  — LockValue, LockConfig
+Bytes [88-89]  — SlotLocked     (bitmapa 16 slotów)
+Bytes [90-91]  — ChipOptions
+Bytes [92-95]  — reserved
+Bytes [96-127] — KeyConfig      (16 slotów × 2 bajty)
+```
+
+Realnie konfigurowalne przez użytkownika: **SlotConfig + KeyConfig = 64 bajty**.
+Reszta to metadane, adresy i locki.
+
+---
+
+## I2C Address w Config Zone
+
+```
+i2cdetect -y 1
+...
+60: 60
+...
+```
+
+Byte `[6]` dumpa = `0x60` — bezpośrednia korelacja z adresem widocznym w `i2cdetect`.
+
+```
+[  0] 01 23 FE 1E 00 00 [60] 02 ...
+```
+
+- Bytes `[0-3]` + `[8-12]` + `[13]` — numer seryjny (rozrzucony)
+- Bytes `[4-5]` — reserved
+- Byte `[6]` = `0x60` — adres I2C
+- Byte `[7]` = `0x02` — OTP mode
+
+Po locku adres jest niezmienny. Gdyby przed lockiem byte `[6]` ustawiono na np. `0x35` — chip odpowiadałby pod `0x35`.
+
+---
+
+## Analiza zmian: przed → po lock zones
+
+### Dump przed lockiem
+```
+[  0] 01 23 FE 1E 00 00 60 02 CB C3 C0 8F EE C1 39 00
+[ 16] C0 00 00 00 83 20 87 20 8F 20 C4 8F 8F 8F 8F 8F
+[ 32] 9F 8F AF 8F 00 00 00 00 00 00 00 00 00 00 00 00
+[ 48] 00 00 AF 8F FF FF FF FF 00 00 00 00 FF FF FF FF
+[ 64] 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+[ 80] 00 00 00 00 00 00 55 55 FF FF 00 00 00 00 00 00
+[ 96] 33 00 33 00 33 00 1C 00 1C 00 1C 00 1C 00 1C 00
+[112] 3C 00 3C 00 3C 00 3C 00 3C 00 3C 00 3C 00 1C 00
+```
+
+### Dump po lock zones
+```
+[  0] 01 23 FE 1E 00 00 60 02 CB C3 C0 8F EE C1 39 00
+[ 16] C0 00 00 00 83 20 87 20 8F 20 83 20 8F 8F 8F 8F
+[ 32] 9F 8F AF 8F 00 00 00 00 00 00 00 00 00 00 00 00
+[ 48] 00 00 AF 8F FF FF FF FF 00 00 00 00 FF FF FF FF
+[ 64] 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+[ 80] 00 00 00 00 00 00 00 00 FF FF 00 00 00 00 00 00
+[ 96] 33 00 33 00 33 00 33 00 1C 00 1C 00 1C 00 1C 00
+[112] 3C 00 3C 00 3C 00 3C 00 3C 00 3C 00 3C 00 1C 00
+```
+
+### Różnice (3 zmiany)
+
+| Bytes | Przed | Po | Znaczenie |
+|-------|-------|----|-----------|
+| [26-27] | `C4 8F` | `83 20` | SlotConfig slot 3 — zmieniony na ECC P256 |
+| [86-87] | `55 55` | `00 00` | **Lock bytes** — `55`=unlocked → `00`=locked |
+| [102-103] | `1C 00` | `33 00` | KeyConfig slot 3 — `Private=1`, `Lockable=1` |
+
+**Sekwencja:** skrypt najpierw zmodyfikował slot 3, potem wykonał `atcab_lock_config_zone()` + `atcab_lock_data_zone()`.
+
+### Lock bytes — co się zmienia po lock_config_zone()
+
+`0x55` = `01010101` binarnie — domyślna wartość "nieskonfigurowane" w EEPROM Microchip (nie `0xFF` jak typowa flash).
+`0x00` = locked. Chip sprawdza te bajty przy każdej operacji write — jeśli nie są `0x55`, odrzuca żądanie.
+
+**Po locku Config Zone:**
+- Config Zone staje się read-only na poziomie hardware — nieodwracalne
+- `atcab_genkey()` staje się możliwy (chip blokuje generowanie kluczy dopóki config nie jest finalny)
+- SlotConfig/KeyConfig zaczyna być egzekwowane: `IsSecret`, `RequireAuth`, `EncryptRead` wchodzą w życie
+- `atcab_lock_data_zone()` staje się możliwy (chip wymaga tej kolejności)
+
+---
+
+## Do czego służy dump zablokowanego chipa
+
+**Dokumentacja i audyt**
+- Dowód konfiguracji produkcyjnej zarchiwizowany w git
+- Podstawa do audytu bezpieczeństwa bez fizycznego dostępu do chipa
+
+**Weryfikacja w field**
+- Porównanie z nieznanym chipem: `assert dump == expected_dump`
+- Automatyzacja w testach produkcyjnych
+
+**Debugging**
+- Weryfikacja że SlotConfig/KeyConfig faktycznie zawiera to co zakładamy
+- Diagnoza błędów `ATCA_EXECUTION_ERROR`
+
+**Klonowanie konfiguracji**
+- Wzorzec do programowania kolejnych partii chipów
+- Historia `przed`/`po` pozwala odtworzyć dokładną sekwencję operacji
+
+---
+
+## Skrypt 2: Generowanie kluczy + Lock Data Zone
+
+Wykonywany **po** `lock_config_zone()`, **przed** `lock_data_zone()`.
+To jedyny moment na `atcab_genkey()` — po locku Data Zone klucze prywatne zamrożone na zawsze.
+
+```python
+from cryptoauthlib import *
+from cryptography.hazmat.primitives.asymmetric import ec, utils
+from cryptography.hazmat.primitives import hashes
+import hashlib
+import time
+import struct
+import base64
+import json
+
+cfg = cfg_ateccx08a_i2c_default()
+cfg.cfg.atcai2c.bus = 1
+cfg.cfg.atcai2c.address = 0xC0
+cfg.devtype = 3
+
+status = atcab_init(cfg)
+assert status == 0, f"Init failed: {status}"
+time.sleep(0.1)
+
+# Sprawdź stan
+config = bytearray(128)
+atcab_read_config_zone(config)
+assert config[87] == 0x00, "Config Zone must be LOCKED first!"
+print(f"Config Zone: LOCKED")
+print(f"Data Zone:   {'LOCKED' if config[86] == 0x00 else 'UNLOCKED'}")
+
+if config[86] == 0x00:
+    print("Data Zone juz zablokowana — klucze sa zamrozone.")
+    print("Nie mozna generowac nowych kluczy.")
+    atcab_release()
+    exit()
+
+serial = bytearray(9)
+atcab_read_serial_number(serial)
+serial_hex = serial.hex()
+print(f"Serial: {serial_hex}")
+
+# ============================================
+# KROK 1: Generowanie finalnych kluczy
+# ============================================
+print("\n" + "=" * 50)
+print("GENEROWANIE FINALNYCH KLUCZY ECC P-256")
+print("=" * 50)
+
+slots = {
+    0: "SSH_Auth",
+    1: "GPG_Sign",
+    2: "GPG_Encrypt",
+    3: "Attestation",
+}
+
+public_keys = {}
+
+for slot, name in slots.items():
+    pub = bytearray(64)
+    status = atcab_genkey(slot, pub)
+    assert status == 0, f"GenKey slot {slot} failed: {status}"
+    public_keys[slot] = bytes(pub)
+    print(f"  Slot {slot} ({name}): {pub.hex()[:40]}...")
+
+# ============================================
+# KROK 2: Weryfikacja — Sign + Verify na kazdym slocie
+# ============================================
+print("\n" + "=" * 50)
+print("WERYFIKACJA SIGN + VERIFY")
+print("=" * 50)
+
+test_msg = b"ATECC608A final key verification"
+digest = hashlib.sha256(test_msg).digest()
+
+for slot, name in slots.items():
+    sig = bytearray(64)
+    status = atcab_sign(slot, bytearray(digest), sig)
+    assert status == 0, f"Sign slot {slot} failed: {status}"
+
+    pub = public_keys[slot]
+    x = int.from_bytes(pub[0:32], 'big')
+    y = int.from_bytes(pub[32:64], 'big')
+    pub_key = ec.EllipticCurvePublicNumbers(x, y, ec.SECP256R1()).public_key()
+
+    r = int.from_bytes(sig[0:32], 'big')
+    s = int.from_bytes(sig[32:64], 'big')
+    der_sig = utils.encode_dss_signature(r, s)
+
+    pub_key.verify(der_sig, test_msg, ec.ECDSA(hashes.SHA256()))
+    print(f"  Slot {slot} ({name}): Sign + Verify OK")
+
+# ============================================
+# KROK 3: Zapis kluczy publicznych
+# ============================================
+print("\n" + "=" * 50)
+print("ZAPIS KLUCZY PUBLICZNYCH")
+print("=" * 50)
+
+with open(f"atecc_{serial_hex}_pubkeys.json", "w") as f:
+    data = {
+        "serial": serial_hex,
+        "chip": "ATECC608A",
+        "slots": {}
+    }
+    for slot, name in slots.items():
+        pub = public_keys[slot]
+        data["slots"][str(slot)] = {
+            "name": name,
+            "public_key_hex": pub.hex(),
+            "x": pub[0:32].hex(),
+            "y": pub[32:64].hex(),
+        }
+    json.dump(data, f, indent=2)
+    print(f"  JSON: atecc_{serial_hex}_pubkeys.json")
+
+# Format SSH (slot 0)
+def pubkey_to_ssh(raw_pub, comment=""):
+    curve = b"nistp256"
+    point = b'\x04' + raw_pub
+    key_data = (
+        struct.pack(">I", 19) + b"ecdsa-sha2-nistp256" +
+        struct.pack(">I", 8) + curve +
+        struct.pack(">I", len(point)) + point
+    )
+    b64 = base64.b64encode(key_data).decode()
+    return f"ecdsa-sha2-nistp256 {b64} {comment}"
+
+ssh_key = pubkey_to_ssh(public_keys[0], f"atecc608a-{serial_hex}-slot0")
+with open(f"atecc_{serial_hex}_ssh.pub", "w") as f:
+    f.write(ssh_key + "\n")
+    print(f"  SSH:  atecc_{serial_hex}_ssh.pub")
+
+# PEM (wszystkie sloty)
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
+for slot, name in slots.items():
+    pub = public_keys[slot]
+    x = int.from_bytes(pub[0:32], 'big')
+    y = int.from_bytes(pub[32:64], 'big')
+    pub_key = ec.EllipticCurvePublicNumbers(x, y, ec.SECP256R1()).public_key()
+    pem = pub_key.public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo)
+    filename = f"atecc_{serial_hex}_slot{slot}_{name}.pem"
+    with open(filename, "w") as f:
+        f.write(pem.decode())
+    print(f"  PEM:  {filename}")
+
+# ============================================
+# KROK 4: Lock Data Zone
+# ============================================
+print("\n" + "=" * 50)
+print("LOCK DATA ZONE")
+print("=" * 50)
+print("Po zablokowaniu klucze prywatne sa zamrozone NA ZAWSZE.")
+print()
+response = input("Zablokowac Data Zone? (wpisz 'TAK'): ")
+
+if response == "TAK":
+    status = atcab_lock_data_zone()
+    assert status == 0, f"Lock data failed: {status}"
+    print("Data Zone: LOCKED")
+
+    config2 = bytearray(128)
+    atcab_read_config_zone(config2)
+    assert config2[86] == 0x00, "Data Zone lock verification failed!"
+    print("Lock zweryfikowany.")
+
+    sig = bytearray(64)
+    atcab_sign(0, bytearray(digest), sig)
+    pub = public_keys[0]
+    x = int.from_bytes(pub[0:32], 'big')
+    y = int.from_bytes(pub[32:64], 'big')
+    pub_key = ec.EllipticCurvePublicNumbers(x, y, ec.SECP256R1()).public_key()
+    r = int.from_bytes(sig[0:32], 'big')
+    s = int.from_bytes(sig[32:64], 'big')
+    der_sig = utils.encode_dss_signature(r, s)
+    pub_key.verify(der_sig, test_msg, ec.ECDSA(hashes.SHA256()))
+    print("Sign + Verify po locku: OK")
+else:
+    print("Data Zone NIE zablokowana.")
+    print("Mozesz jeszcze generowac nowe klucze.")
+
+print("\n" + "=" * 50)
+print("GOTOWE")
+print("=" * 50)
+
+atcab_release()
+```
+
+### Co robi skrypt krok po kroku
+
+1. Sprawdza że Config jest LOCKED, Data jest UNLOCKED — jedyne poprawne okno
+2. Dla slotów 0-3 wywołuje `atcab_genkey()` — generuje losowe klucze ECC P-256
+3. Na każdym slocie robi Sign + software Verify — potwierdza że klucz działa przed lockiem
+4. Zapisuje klucze publiczne w 3 formatach: JSON (backup), `.pub` (SSH dla slot 0), `.pem` (każdy slot)
+5. Pyta o potwierdzenie przed `atcab_lock_data_zone()` — guard przed przypadkowym lockiem
+6. Po locku robi jeszcze jeden Sign + Verify jako dowód że chip działa finalnie
+
+### Uwagi
+- Software verify przez `cryptography` — `atcab_verify_extern()` wymaga locked Data Zone, więc przed lockiem trzeba weryfikować poza chipem
+- `atcab_sign()` przyjmuje 32-bajtowy SHA-256 digest, nie surową wiadomość
+- Każde wywołanie `atcab_genkey()` nadpisuje poprzedni klucz — wywoływać tylko raz na slot finalnie
