@@ -99,7 +99,7 @@ python3 scripts/test_atecc.py
 - [x] Lock config zone on ATECC608A (enables real RNG and key generation)
 - [x] ECC P-256 key generation and ECDSA signing
 - [x] OPTIGA Trust M Python communication
-- [ ] ATECC608B bare chip soldering and testing
+- [x] ATECC608B bare chip soldering and testing
 - [ ] Signing service prototype (Web3Signer-compatible)
 
 ## Lessons Learned
